@@ -1,0 +1,201 @@
+---
+title: "SPS_Data607_Week10B_DC"
+format: pdf
+editor: visual
+author: "David Chen"
+---
+
+## Assignment 10B: More JSON Practice
+
+The Nobel Prize organization provides public APIs for accessing structured Nobel Prize data.\
+Using one or both of the APIs available at the Nobel Prize Developer Zone, your task is to **use JSON data to investigate and answer four interesting, data-driven questions**.
+
+At least one of your questions should go beyond simple counts and require **joining, filtering, or comparing fields** across the data (e.g., *“Which country lost the most Nobel laureates—born there but awarded as a citizen of another country?”*).
+
+#### Requirements
+
+1.  Use one or both Nobel Prize APIs to retrieve data in **JSON** format.
+
+2.  In **R**, load and transform the JSON data into tidy data frames.
+
+3.  Formulate **four questions** that can be answered from the data.
+
+4.  For each question:
+
+    -   Describe the question
+
+    -   Show the code used
+
+    -   Present the answer (table, summary, or plot)
+
+#### Deliverables
+
+Submit a single Quarto (`.qmd`) file that includes:
+
+-   Your four questions
+
+-   All R code used to retrieve and process the data
+
+-   The resulting answers
+
+You may complete this assignment **individually or in a small group**.
+
+## The Nobel Prize API link
+
+https://api.nobelprize.org/2.1/laureates
+
+https://api.nobelprize.org/2.1/nobelPrizes
+
+```{r}
+library(httr)
+library(jsonlite)
+library(dplyr)
+library(tidyr)
+
+
+
+
+if(all(file.exists(c("df_laureates.json", "df_nobel.json")))) {
+  # load both files
+  print("Cache files exits\n")
+
+  
+  json1 <- readLines("df_laureates.json", warn = FALSE)
+  json2 <- readLines("df_nobel.json", warn = FALSE)
+  
+}else{
+  # load from API
+  #url1 <- "https://api.nobelprize.org/2.1/laureates"
+  url1 <- "https://api.nobelprize.org/2.1/laureates?limit=1018"
+  #url2 <- "https://api.nobelprize.org/2.1/nobelPrizes"
+  url2 <- "https://api.nobelprize.org/2.1/nobelPrizes?limit=682"
+  res1 <- GET(url1)
+  res2 <- GET(url2)
+  
+  json1 <- content(res1, as = "text", encoding = "UTF-8")
+  json2 <- content(res2, as = "text", encoding = "UTF-8")
+  writeLines(json1, "df_laureates.json")
+  writeLines(json2, "df_nobel.json")
+  
+  
+}
+
+```
+
+
+```{r}
+# identical(df_laureates, df_laureates_0)
+# identical(df_nobel, df_nobel_0)
+data1 <- fromJSON(json1, flatten = TRUE)
+data2 <- fromJSON(json2, flatten = TRUE)
+js_laureates <- data1$laureates
+js_nobel <- data2$nobelPrizes
+```
+```{r}
+library(tidyr)
+df_nobelprizes <- js_nobel %>%
+  select(awardYear,laureates, category.en)%>%
+  unnest(laureates) %>%
+  transmute(
+    l_id = id,
+    laureate_name = fullName.en,
+    award_year = awardYear,
+    category = category.en
+  )
+#df_nobelprizes
+
+```
+```{r}
+df_laureates <- js_laureates %>%
+  select(id, gender, 'birth.year', 'birth.place.city.en', 'birth.place.countryNow.en','birth.place.continent.en')%>%
+
+  transmute(
+    l_id=id,
+    gender=gender,
+    birth_year=birth.year,
+    city=birth.place.city.en,
+    birth_country=birth.place.countryNow.en,
+    birth_continent=birth.place.continent.en
+  )
+#df_laureates
+#names(df_laureates)
+```
+
+### Combine both data frames
+
+```{r}
+
+df_combined_nobel <- left_join(df_nobelprizes,df_laureates,by ="l_id")
+#df_combined_nobel
+```
+
+## Q1: Comparing in gender
+```{r}
+library(ggplot2)
+ggplot(df_combined_nobel, aes(x = gender,fill = gender)) +
+  geom_bar() +
+  geom_text(stat = "count",
+            aes(label = after_stat(count)),
+            vjust = -0.5) +
+  labs(title = "Count by Gender",
+       x = "Gender",
+       y = "Count")
+```
+## Q2: How many Asians were awarded, and how are they distributed by country?
+```{r}
+df_combined_nobel %>%
+  filter(birth_continent == "Asia") %>%
+  count(birth_country, sort = TRUE) %>%
+  
+  ggplot(aes(x = reorder(birth_country,n), y=n,fill = birth_country)) +
+  geom_col() +
+  # geom_text(stat = "count",
+  #           aes(label = after_stat(count)),
+  #           vjust = -0.5) +
+  geom_text(
+            aes(label = n),
+            hjust = -0.2) +
+  coord_flip() +
+  labs(title = "Asian Nobel Prizes by Country",
+       x = "Country",
+       y = "Count") +
+  theme_minimal()
+```
+## Q3 Which categories were Japan, India, and China awarded in?
+
+```{r}
+df_combined_nobel %>%
+  filter(birth_country %in% c("Japan", "China", "India")) %>%
+  count(birth_country, category) %>%
+  ggplot(aes(x = birth_country, y = n, fill = category)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = n),
+            position = position_dodge(width = 0.9),
+            vjust = -0.3) +
+  labs(title = "Counts by Japan, India and China w Category",
+       x = "Country",
+       y = "Count") 
+```
+## Q4: Comparing the distribution of Nobel Prizes across different continents.
+
+```{r}
+df_combined_nobel %>%
+  #filter(birth_country %in% c("Japan", "China", "India")) %>%
+  count(birth_continent, category) %>%
+  ggplot(aes(x = birth_continent, y = n, fill = category)) +
+  geom_col(position = "dodge") +
+  coord_flip()+
+  geom_text(aes(label = n),
+            position = position_dodge(width = 0.9),
+            vjust = -0.3) +
+  labs(title = "Counts by Continent w Category",
+       x = "Continent",
+       y = "Count") 
+```
+## Conlusion
+By using the Nobel Prize API, this project also provided hands-on experience in working with JSON data, including retrieving, parsing, and converting API responses into structured data frames in R.That explored Nobel Prize data using R to uncover patterns in awards across categories, countries, and time periods. Through data cleaning, transformation, and visualization, we identified clear trends in how Nobel Prizes are distributed globally.
+
+
+### LLMS used:
+
+• OpenAI. (2025). ChatGPT (Version 5.2) \[Large language model\]. https://chat.openai.com. Accessed Apr 19, 2026.
